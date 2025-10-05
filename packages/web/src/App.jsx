@@ -1,19 +1,168 @@
-import { useState } from 'react'
-import './App.css'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { GoogleMap, Marker, useJsApiLoader } from '@react-google-maps/api'
+import { subscribeToNativeMessages, signalWebReady, startExploration, stopExploration } from './bridge'
+import FogOverlay from './overlay/FogOverlay'
+import MultiHoleOverlay from './overlay/MultiHoleOverlay'
+import StatusOverlay from './components/StatusOverlay'
 
-function App() {
-  const [count, setCount] = useState(0)
+const containerStyle = { width: '100vw', height: '100vh' }
+const defaultCenter = { lat: 37.5665, lng: 126.9780 } // Seoul
+
+export default function App() {
+  const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY
+
+  const { isLoaded, loadError } = useJsApiLoader({
+    id: 'google-map-script',
+    googleMapsApiKey: apiKey || '',
+    libraries: ['geometry'],
+  })
+
+  const [pos, setPos] = useState(null)
+  const mapRef = useRef(null)
+  const [mapReady, setMapReady] = useState(false)
+  const [holes, setHoles] = useState([])
+  const [manualHoles, setManualHoles] = useState([]) // UI로 추가한 로컬 HOLE들
+  const [exploring, setExploring] = useState(false)
+  const center = useMemo(() => (pos ? { lat: pos.lat, lng: pos.lng } : defaultCenter), [pos])
+  // 임시 고정 HOLE: 경복궁 인근
+  const staticHoles = useMemo(() => [
+    { latitude: 37.579617, longitude: 126.977041 },
+  ], [])
+
+  const addHoleAtCenter = () => {
+    if (!mapRef.current) return
+    const c = mapRef.current.getCenter()
+    if (!c) return
+    setManualHoles((prev) => [
+      ...prev,
+      { latitude: c.lat(), longitude: c.lng() },
+    ])
+  }
+
+  const toggleExplore = () => {
+    if (exploring) {
+      stopExploration()
+    } else {
+      startExploration()
+    }
+    // 낙관적 UI 업데이트 (네이티브에서 explore_status로 확정 예정)
+    setExploring((v) => !v)
+  }
+
+  useEffect(() => {
+    // Notify native that the web app is mounted and ready to receive messages
+    signalWebReady()
+    return subscribeToNativeMessages((data) => {
+      if (data?.type === 'location' && data?.coords) {
+        const { latitude, longitude } = data.coords
+        setPos({ lat: latitude, lng: longitude })
+      }
+      if (data?.type === 'explore_status' && typeof data.active === 'boolean') {
+        setExploring(!!data.active)
+      }
+      if (data?.type === 'holes_add' && Array.isArray(data.points)) {
+        setHoles((prev) => [...prev, ...data.points])
+      }
+      if (data?.type === 'holes_sync' && Array.isArray(data.points)) {
+        setHoles(data.points)
+      }
+      if (data?.type === 'holes_clear') {
+        setHoles([])
+      }
+    })
+  }, [])
+
+  if (loadError) return <div style={containerStyle}>지도를 불러오지 못했습니다.</div>
+  if (!isLoaded) return <div style={containerStyle}>지도를 불러오는 중…</div>
 
   return (
-    <div className="App">
-      <h1>Vite + React (@onsegil/web)</h1>
-      <p>모노레포 워크스페이스가 정상 동작합니다.</p>
-      <button onClick={() => setCount((c) => c + 1)}>
-        count is {count}
+    <div style={{ position: 'relative', width: '100vw', height: '100vh' }}>
+      <GoogleMap
+        mapContainerStyle={containerStyle}
+        center={center}
+        zoom={12}
+        onLoad={(map) => {
+          console.log('mapLoad', map)
+          mapRef.current = map
+          setMapReady(true)
+          // 별도 지오메트리 계산 불필요 (native OverlayView가 pane 전체를 덮음)
+        }}
+        onUnmount={() => {
+          mapRef.current = null
+          setMapReady(false)
+        }}
+        options={{
+          fullscreenControl: false,
+          mapTypeControl: false,
+          streetViewControl: false,
+        }}
+      >
+        {/* 현재 위치 마커는 위치 수신 시에만 */}
+        {pos && (
+          <Marker
+            position={center}
+            icon={{
+              path: google.maps.SymbolPath.CIRCLE,
+              scale: 6,
+              fillColor: '#1e90ff',
+              fillOpacity: 1,
+              strokeColor: '#ffffff',
+              strokeWeight: 2,
+            }}
+          />
+        )}
+      </GoogleMap>
+      {/* DOM 상단 SVG 오버레이: 지도 컨테이너 위 절대 배치 */}
+      {mapReady && (
+        <FogOverlay
+          map={mapRef.current}
+          holes={[
+            ...staticHoles,
+            ...(pos ? [{ latitude: pos.lat, longitude: pos.lng }] : []),
+            ...holes.map((p) => ({ latitude: p.lat, longitude: p.lng })),
+            ...manualHoles,
+          ]}
+        />
+      )}
+      {/* 상태 오버레이: 화면 고정 표시 */}
+      <StatusOverlay pos={pos} holesCount={staticHoles.length + holes.length + manualHoles.length} />
+      {/* 상단 버튼: 현재 화면 중심에 HOLE 추가 */}
+      <button
+        onClick={addHoleAtCenter}
+        style={{
+          position: 'absolute',
+          // iOS WKWebView 상단 안전영역 보정
+          top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+          right: 12,
+          zIndex: 10001,
+          padding: '8px 10px',
+          borderRadius: 8,
+          border: '1px solid rgba(255,255,255,0.5)',
+          background: 'rgba(0,0,0,0.55)',
+          color: '#fff',
+          cursor: 'pointer',
+        }}
+      >
+        홀 추가
+      </button>
+      {/* 상단 버튼: 탐험 시작/종료 토글 */}
+      <button
+        onClick={toggleExplore}
+        style={{
+          position: 'absolute',
+          top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+          left: 12,
+          zIndex: 10001,
+          padding: '8px 10px',
+          borderRadius: 8,
+          border: exploring ? '1px solid rgba(255,90,90,0.7)' : '1px solid rgba(255,255,255,0.5)',
+          background: exploring ? 'rgba(220,0,0,0.6)' : 'rgba(0,0,0,0.55)',
+          color: '#fff',
+          cursor: 'pointer',
+        }}
+      >
+        {exploring ? '탐험 종료' : '탐험 시작'}
       </button>
     </div>
   )
 }
-
-export default App
-
