@@ -85,17 +85,37 @@ export default function FogOverlay({ map, holes = [] }) {
     updater.setMap(map)
     updaterRef.current = updater
 
-    const idleL = google.maps.event.addListener(map, 'idle', () => updater.draw())
-    const dragL = google.maps.event.addListener(map, 'drag', () => updater.draw())
-    const zoomL = google.maps.event.addListener(map, 'zoom_changed', () => updater.draw())
-    const resize = () => updater.draw()
+    // rAF로 이벤트 폭주를 1프레임 1회로 스로틀
+    let rafId = null
+    const schedule = () => {
+      if (rafId) cancelAnimationFrame(rafId)
+      rafId = requestAnimationFrame(() => updater.draw())
+    }
+
+    // 지도의 상태 변화에 촘촘히 반응하도록 다양한 이벤트를 구독
+    const listeners = [
+      google.maps.event.addListener(map, 'center_changed', schedule),
+      google.maps.event.addListener(map, 'bounds_changed', schedule),
+      google.maps.event.addListener(map, 'zoom_changed', schedule),
+      google.maps.event.addListener(map, 'drag', schedule),
+      google.maps.event.addListener(map, 'idle', schedule),
+    ]
+
+    // 터치/마우스 이동 중에도 즉시 반응하도록 DOM 레벨 이벤트도 보강
+    const mapDiv = map.getDiv()
+    const domMove = () => schedule()
+    mapDiv.addEventListener('touchmove', domMove, { passive: true })
+    mapDiv.addEventListener('mousemove', domMove, { passive: true })
+
+    const resize = () => schedule()
     window.addEventListener('resize', resize)
 
     return () => {
       window.removeEventListener('resize', resize)
-      google.maps.event.removeListener(idleL)
-      google.maps.event.removeListener(dragL)
-      google.maps.event.removeListener(zoomL)
+      mapDiv.removeEventListener('touchmove', domMove)
+      mapDiv.removeEventListener('mousemove', domMove)
+      listeners.forEach(l => google.maps.event.removeListener(l))
+      if (rafId) cancelAnimationFrame(rafId)
       updater.setMap(null)
       updaterRef.current = null
     }
