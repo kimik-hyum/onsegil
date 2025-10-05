@@ -55,7 +55,7 @@ export default function FogOverlay({ map, holes = [] }) {
           if (maskBlurRef.current) maskBlurRef.current.setAttribute('stdDeviation', String(std))
         } catch {}
 
-        // 하나의 path로 모든 홀을 표현 (even-odd 규칙)
+        // 하나의 path로 모든 홀을 표현 (union 효과)
         let d = ''
 
         // meters per pixel 근사치(빠름)
@@ -64,20 +64,58 @@ export default function FogOverlay({ map, holes = [] }) {
         const zoom = map.getZoom?.() ?? 15
         const metersPerPixel = 156543.03392 * Math.cos((latForMpp * Math.PI) / 180) / Math.pow(2, zoom)
 
-        for (const h of this.holes) {
-          const ll = new google.maps.LatLng(h.latitude, h.longitude)
-          const pt = proj.fromLatLngToContainerPixel(ll)
-          if (!pt) continue
+        // 1) 화면 내 투영 + 간단한 그리드 기반 클러스터링으로 아크 수를 줄임
+        const baseR = 50 / metersPerPixel
+        if (baseR > 0) {
+          // 기준 셀 크기: 확대일수록 작게, 상호작용 중이면 크게(퍼포먼스 우선)
+          const baseCell = Math.max(24, Math.min(96, 64 - (zoom - 12) * 8))
+          const cellSize = interactingRef.current ? baseCell * 1.5 : baseCell
+          const grid = new Map()
+          let visibleCount = 0
 
-          // 50m → px(근사)
-          const r = 50 / metersPerPixel
-          if (r <= 0) continue
+          for (const h of this.holes) {
+            const ll = new google.maps.LatLng(h.latitude, h.longitude)
+            const pt = proj.fromLatLngToContainerPixel(ll)
+            if (!pt) continue
+            const r = baseR
+            if (pt.x + r < 0 || pt.x - r > width || pt.y + r < 0 || pt.y - r > height) continue
+            visibleCount++
+            const gx = Math.floor(pt.x / cellSize)
+            const gy = Math.floor(pt.y / cellSize)
+            const key = gx + ':' + gy
+            const cur = grid.get(key)
+            if (cur) {
+              cur.x += pt.x; cur.y += pt.y; cur.n += 1
+            } else {
+              grid.set(key, { x: pt.x, y: pt.y, n: 1 })
+            }
+          }
 
-          // 화면 밖은 스킵
-          if (pt.x + r < 0 || pt.x - r > width || pt.y + r < 0 || pt.y - r > height) continue
+          // 너무 많으면 더 굵은 셀로 한 번 더 축소
+          const MAX_ARCS = interactingRef.current ? 250 : 400
+          if (grid.size > MAX_ARCS) {
+            // 셀 크기 2배로 다시 병합
+            const grid2 = new Map()
+            const factor = 2
+            for (const { x, y, n } of grid.values()) {
+              const cx = x / n, cy = y / n
+              const gx = Math.floor(cx / (cellSize * factor))
+              const gy = Math.floor(cy / (cellSize * factor))
+              const key = gx + ':' + gy
+              const cur = grid2.get(key)
+              if (cur) { cur.x += cx; cur.y += cy; cur.n += n } else { grid2.set(key, { x: cx, y: cy, n }) }
+            }
+            grid.clear()
+            for (const [k, v] of grid2) grid.set(k, v)
+          }
 
-          // 원을 경로(아크)로 추가
-          d += ` M${pt.x} ${pt.y} m ${-r},0 a ${r},${r} 0 1,0 ${r * 2},0 a ${r},${r} 0 1,0 ${-r * 2},0 Z`
+          // 2) 셀 집계 결과로 하나의 path 생성(원의 면적 합을 근사: r * sqrt(n) 제한)
+          for (const { x, y, n } of grid.values()) {
+            const cx = x / n
+            const cy = y / n
+            const r = Math.max(1, Math.min(baseR * Math.sqrt(n), baseR * 2.5))
+            d += ` M${cx} ${cy} m ${-r},0 a ${r},${r} 0 1,0 ${r * 2},0 a ${r},${r} 0 1,0 ${-r * 2},0 Z`
+          }
         }
         if (d) {
           pathEl.setAttribute('d', d)
