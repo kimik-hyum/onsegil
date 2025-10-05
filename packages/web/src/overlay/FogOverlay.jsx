@@ -9,6 +9,8 @@ export default function FogOverlay({ map, holes = [] }) {
   const holesGroupRef = useRef(null)
   const maskHolesGroupRef = useRef(null)
   const updaterRef = useRef(null)
+  const circlesPoolRef = useRef([])
+  const maskBlurRef = useRef(null)
 
   // OverlayView를 이용해 projection을 얻고, rAF로 픽셀 위치 갱신
   useEffect(() => {
@@ -39,45 +41,57 @@ export default function FogOverlay({ map, holes = [] }) {
         const mapDiv = map.getDiv()
         const width = mapDiv?.offsetWidth || 0
         const height = mapDiv?.offsetHeight || 0
-        const holesGroup = holesGroupRef.current // not used when mask를 기본으로 사용
         const maskGroup = maskHolesGroupRef.current
         if (!width || !height || !maskGroup) return
 
-        // reset
-        maskGroup.innerHTML = ''
-        const frag = document.createDocumentFragment()
+        // 동적 블러 강도(고배율에서 과도한 페인트 방지)
+        try {
+          const zoom = map.getZoom?.() ?? 15
+          const std = Math.max(4, Math.min(10, 12 - (zoom - 12)))
+          if (maskBlurRef.current) maskBlurRef.current.setAttribute('stdDeviation', String(std))
+        } catch {}
 
-        const addCircle = (g, cx, cy, r, fill) => {
-          const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-          c.setAttribute('cx', String(cx))
-          c.setAttribute('cy', String(cy))
-          c.setAttribute('r', String(r))
-          c.setAttribute('fill', fill)
-          g.appendChild(c)
-        }
+        const pool = circlesPoolRef.current
+        let visible = 0
+
+        // meters per pixel 근사치(빠름)
+        const center = map.getCenter?.()
+        const latForMpp = center ? center.lat() : 0
+        const zoom = map.getZoom?.() ?? 15
+        const metersPerPixel = 156543.03392 * Math.cos((latForMpp * Math.PI) / 180) / Math.pow(2, zoom)
 
         for (const h of this.holes) {
           const ll = new google.maps.LatLng(h.latitude, h.longitude)
           const pt = proj.fromLatLngToContainerPixel(ll)
           if (!pt) continue
 
-          // 50m → px (정확도 우선: geometry.computeOffset 사용)
-          let r = 0
-          try {
-            const east = google.maps.geometry.spherical.computeOffset(ll, 50, 90)
-            const p0 = proj.fromLatLngToContainerPixel(ll)
-            const p1 = proj.fromLatLngToContainerPixel(east)
-            r = p0 && p1 ? Math.hypot(p1.x - p0.x, p1.y - p0.y) : 0
-          } catch {}
+          // 50m → px(근사)
+          const r = 50 / metersPerPixel
           if (r <= 0) continue
 
           // 화면 밖은 스킵
           if (pt.x + r < 0 || pt.x - r > width || pt.y + r < 0 || pt.y - r > height) continue
 
-          // 마스크: 검정(투명) 원을 그리고, 그룹에 블러 필터를 적용해 부드러운 경계.
-          addCircle(frag, pt.x, pt.y, r, '#000')
+          // 풀 기반 재사용
+          let el = pool[visible]
+          if (!el) {
+            el = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+            el.setAttribute('fill', '#000')
+            maskGroup.appendChild(el)
+            pool[visible] = el
+          }
+          el.setAttribute('cx', String(pt.x))
+          el.setAttribute('cy', String(pt.y))
+          el.setAttribute('r', String(r))
+          el.style.display = ''
+          visible++
         }
-        maskGroup.appendChild(frag)
+
+        // 남는 원 숨김
+        for (let i = visible; i < pool.length; i++) {
+          const el = pool[i]
+          if (el) el.style.display = 'none'
+        }
       }
     }
 
@@ -135,7 +149,7 @@ export default function FogOverlay({ map, holes = [] }) {
       <defs>
         {/* 마스크: 검정(구멍) 원 + 가우시안 블러로 페더링 → 겹치면 자연스럽게 합집합 */}
         <filter id="maskBlur" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="12" />
+          <feGaussianBlur ref={maskBlurRef} stdDeviation="10" />
         </filter>
         <mask id="fogMask">
           <rect width="100%" height="100%" fill="white" />
