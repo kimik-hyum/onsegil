@@ -7,10 +7,11 @@ import { useEffect, useRef } from 'react'
 export default function FogOverlay({ map, holes = [] }) {
   const svgRef = useRef(null)
   const holesGroupRef = useRef(null)
+  const holesPathRef = useRef(null)
   const maskHolesGroupRef = useRef(null)
   const updaterRef = useRef(null)
-  const circlesPoolRef = useRef([])
   const maskBlurRef = useRef(null)
+  const interactingRef = useRef(false)
 
   // OverlayView를 이용해 projection을 얻고, rAF로 픽셀 위치 갱신
   useEffect(() => {
@@ -42,17 +43,20 @@ export default function FogOverlay({ map, holes = [] }) {
         const width = mapDiv?.offsetWidth || 0
         const height = mapDiv?.offsetHeight || 0
         const maskGroup = maskHolesGroupRef.current
-        if (!width || !height || !maskGroup) return
+        const pathEl = holesPathRef.current
+        if (!width || !height || !maskGroup || !pathEl) return
 
         // 동적 블러 강도(고배율에서 과도한 페인트 방지)
         try {
           const zoom = map.getZoom?.() ?? 15
-          const std = Math.max(4, Math.min(10, 12 - (zoom - 12)))
+          // 상호작용 중이면 블러를 더 낮춰 페인트 비용 절감
+          const base = Math.max(4, Math.min(10, 12 - (zoom - 12)))
+          const std = interactingRef.current ? Math.max(3, base - 2) : base
           if (maskBlurRef.current) maskBlurRef.current.setAttribute('stdDeviation', String(std))
         } catch {}
 
-        const pool = circlesPoolRef.current
-        let visible = 0
+        // 하나의 path로 모든 홀을 표현 (even-odd 규칙)
+        let d = ''
 
         // meters per pixel 근사치(빠름)
         const center = map.getCenter?.()
@@ -72,25 +76,14 @@ export default function FogOverlay({ map, holes = [] }) {
           // 화면 밖은 스킵
           if (pt.x + r < 0 || pt.x - r > width || pt.y + r < 0 || pt.y - r > height) continue
 
-          // 풀 기반 재사용
-          let el = pool[visible]
-          if (!el) {
-            el = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-            el.setAttribute('fill', '#000')
-            maskGroup.appendChild(el)
-            pool[visible] = el
-          }
-          el.setAttribute('cx', String(pt.x))
-          el.setAttribute('cy', String(pt.y))
-          el.setAttribute('r', String(r))
-          el.style.display = ''
-          visible++
+          // 원을 경로(아크)로 추가
+          d += ` M${pt.x} ${pt.y} m ${-r},0 a ${r},${r} 0 1,0 ${r * 2},0 a ${r},${r} 0 1,0 ${-r * 2},0 Z`
         }
-
-        // 남는 원 숨김
-        for (let i = visible; i < pool.length; i++) {
-          const el = pool[i]
-          if (el) el.style.display = 'none'
+        if (d) {
+          pathEl.setAttribute('d', d)
+          pathEl.style.display = ''
+        } else {
+          pathEl.style.display = 'none'
         }
       }
     }
@@ -117,17 +110,27 @@ export default function FogOverlay({ map, holes = [] }) {
 
     // 터치/마우스 이동 중에도 즉시 반응하도록 DOM 레벨 이벤트도 보강
     const mapDiv = map.getDiv()
-    const domMove = () => schedule()
-    mapDiv.addEventListener('touchmove', domMove, { passive: true })
-    mapDiv.addEventListener('mousemove', domMove, { passive: true })
+    const onStart = () => { interactingRef.current = true; schedule() }
+    const onMove = () => schedule()
+    const onEnd = () => { interactingRef.current = false; schedule() }
+    mapDiv.addEventListener('touchstart', onStart, { passive: true })
+    mapDiv.addEventListener('mousedown', onStart, { passive: true })
+    mapDiv.addEventListener('touchmove', onMove, { passive: true })
+    mapDiv.addEventListener('mousemove', onMove, { passive: true })
+    mapDiv.addEventListener('touchend', onEnd, { passive: true })
+    mapDiv.addEventListener('mouseup', onEnd, { passive: true })
 
     const resize = () => schedule()
     window.addEventListener('resize', resize)
 
     return () => {
       window.removeEventListener('resize', resize)
-      mapDiv.removeEventListener('touchmove', domMove)
-      mapDiv.removeEventListener('mousemove', domMove)
+      mapDiv.removeEventListener('touchstart', onStart)
+      mapDiv.removeEventListener('mousedown', onStart)
+      mapDiv.removeEventListener('touchmove', onMove)
+      mapDiv.removeEventListener('mousemove', onMove)
+      mapDiv.removeEventListener('touchend', onEnd)
+      mapDiv.removeEventListener('mouseup', onEnd)
       listeners.forEach(l => google.maps.event.removeListener(l))
       if (rafId) cancelAnimationFrame(rafId)
       updater.setMap(null)
@@ -153,7 +156,9 @@ export default function FogOverlay({ map, holes = [] }) {
         </filter>
         <mask id="fogMask">
           <rect width="100%" height="100%" fill="white" />
-          <g ref={maskHolesGroupRef} filter="url(#maskBlur)" />
+          <g ref={maskHolesGroupRef} filter="url(#maskBlur)">
+            <path ref={holesPathRef} fill="#000" fillRule="nonzero" />
+          </g>
         </mask>
       </defs>
 
