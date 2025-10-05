@@ -1,0 +1,22 @@
+{
+  "cli": {
+    "requireCommit": false
+  },
+  "build": {
+    "development": {
+      "distribution": "internal",
+      "ios": {
+        "buildConfiguration": "Debug"
+      }
+    },
+    "preview": {
+      "distribution": "internal"
+    },
+    "production": {
+      "distribution": "store"
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

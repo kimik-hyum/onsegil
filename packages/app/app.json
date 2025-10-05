@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "app",
-    "slug": "app",
+    "name": "onsegil",
+    "slug": "onsegil",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -17,10 +17,17 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "현재 위치를 지도에 표시하기 위해 위치 권한이 필요합니다.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "백그라운드에서도 위치를 업데이트하여 정확한 위치 정보를 제공합니다.",
-        "UIBackgroundModes": ["location"]
-      }
+        "UIBackgroundModes": [
+          "location"
+        ],
+        "CFBundleDisplayName": "onsegil"
+      },
+      "bundleIdentifier": "com.junuj.app",
+      "buildNumber": "1"
     },
     "android": {
+      "package": "com.junuj.app",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -37,7 +44,7 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "WEB_URL": "https://your-web-domain.example.com" 
+      "WEB_URL": "https://onsegil-web.vercel.app"
     }
   }
 }
