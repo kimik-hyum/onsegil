@@ -1,0 +1,14 @@
+{
+  "name": "@onsegil/example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "index.js",
+  "exports": "./index.js",
+  "scripts": {
+    "build": "echo 'build @onsegil/example'",
+    "test": "node index.js",
+    "lint": "echo 'lint @onsegil/example'",
+    "clean": "rimraf dist || true"
+  }
+}

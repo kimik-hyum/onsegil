@@ -1,0 +1,19 @@
+.App {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+button {
+  appearance: none;
+  border: 1px solid currentColor;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+}
+
+button:hover {
+  opacity: 0.85;
+}
+

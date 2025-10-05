@@ -1,0 +1,21 @@
+{
+  "name": "onsegil",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "yarn workspaces foreach -v run build",
+    "test": "yarn workspaces foreach -v run test",
+    "lint": "yarn workspaces foreach -v run lint",
+    "clean": "yarn workspaces foreach -v run clean",
+    "web:dev": "yarn workspace @onsegil/web dev",
+    "web:build": "yarn workspace @onsegil/web build",
+    "web:preview": "yarn workspace @onsegil/web preview",
+    "app:start": "yarn workspace @onsegil/app start",
+    "app:ios": "yarn workspace @onsegil/app ios",
+    "app:android": "yarn workspace @onsegil/app android",
+    "app:web": "yarn workspace @onsegil/app web"
+  },
+  "packageManager": "yarn@4.10.3"
+}
