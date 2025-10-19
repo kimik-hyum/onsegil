@@ -5,6 +5,7 @@ export default function FogOverlay({ map, holes = [] }) {
   const canvasRef = useRef(null)
   const updaterRef = useRef(null)
   const interactingRef = useRef(false)
+  const gradientCacheRef = useRef(new Map())
 
   useEffect(() => {
     if (!map || !window.google) return
@@ -134,13 +135,41 @@ export default function FogOverlay({ map, holes = [] }) {
 
         ctx.globalCompositeOperation = 'destination-out'
         for (const item of entries) {
-          const gradient = ctx.createRadialGradient(item.x, item.y, item.inner, item.x, item.y, item.outer)
-          gradient.addColorStop(0, 'rgba(0,0,0,1)')
-          gradient.addColorStop(1, 'rgba(0,0,0,0)')
-          ctx.fillStyle = gradient
-          ctx.beginPath()
-          ctx.arc(item.x, item.y, item.outer, 0, Math.PI * 2)
-          ctx.fill()
+          const ratio = item.outer > 0 ? item.inner / item.outer : 0.5
+          const bucket = Math.max(0, Math.min(1, Math.round(ratio * 20) / 20))
+
+          let sprite = gradientCacheRef.current.get(bucket)
+          if (!sprite) {
+            const size = 256
+            const gradientCanvas =
+              typeof OffscreenCanvas !== 'undefined' ? new OffscreenCanvas(size, size) : document.createElement('canvas')
+            gradientCanvas.width = size
+            gradientCanvas.height = size
+            const gctx = gradientCanvas.getContext('2d')
+            if (gctx) {
+              const r = size / 2
+              const grad = gctx.createRadialGradient(r, r, r * bucket, r, r, r)
+              grad.addColorStop(0, 'rgba(0,0,0,1)')
+              grad.addColorStop(1, 'rgba(0,0,0,0)')
+              gctx.fillStyle = grad
+              gctx.fillRect(0, 0, size, size)
+              sprite = { canvas: gradientCanvas, size }
+              gradientCacheRef.current.set(bucket, sprite)
+            }
+          }
+
+          if (sprite) {
+            const drawSize = item.outer * 2
+            ctx.drawImage(sprite.canvas, item.x - item.outer, item.y - item.outer, drawSize, drawSize)
+          } else {
+            const gradient = ctx.createRadialGradient(item.x, item.y, item.inner, item.x, item.y, item.outer)
+            gradient.addColorStop(0, 'rgba(0,0,0,1)')
+            gradient.addColorStop(1, 'rgba(0,0,0,0)')
+            ctx.fillStyle = gradient
+            ctx.beginPath()
+            ctx.arc(item.x, item.y, item.outer, 0, Math.PI * 2)
+            ctx.fill()
+          }
         }
         ctx.globalCompositeOperation = 'source-over'
       }
