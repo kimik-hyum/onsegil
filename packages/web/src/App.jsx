@@ -24,10 +24,29 @@ export default function App() {
   const [manualHoles, setManualHoles] = useState([]) // UI로 추가한 로컬 HOLE들
   const [exploring, setExploring] = useState(false)
   const center = useMemo(() => (pos ? { lat: pos.lat, lng: pos.lng } : defaultCenter), [pos])
-  // 임시 고정 HOLE: 경복궁 인근
-  const staticHoles = useMemo(() => [
-    { latitude: 37.579617, longitude: 126.977041 },
-  ], [])
+  // 퍼포먼스 검증용 고정 HOLE: 경복궁 일대 25x20 그리드(총 500개)
+  const staticHoles = useMemo(() => {
+    const baseLat = 37.579617
+    const baseLng = 126.977041
+    const rows = 20
+    const cols = 25
+    const latStep = 0.00018
+    const lngStep = 0.00022
+    const jitter = 0.00003
+    const out = []
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c
+        const latOffset = (r - (rows - 1) / 2) * latStep + Math.sin(idx) * jitter
+        const lngOffset = (c - (cols - 1) / 2) * lngStep + Math.cos(idx) * jitter
+        out.push({
+          latitude: baseLat + latOffset,
+          longitude: baseLng + lngOffset,
+        })
+      }
+    }
+    return out
+  }, [])
 
   const addHoleAtCenter = () => {
     if (!mapRef.current) return
